@@ -38,7 +38,7 @@ function getMapHtml(
     html, body, #map { width:100%; height:100%; background:#0d1b2a; }
     /* Navy blue tint filter on tiles */
     .leaflet-tile-pane {
-      filter: brightness(0.55) contrast(1.3) sepia(0.35) hue-rotate(180deg) saturate(2.2);
+      filter: brightness(0.78) contrast(1.15) sepia(0.3) hue-rotate(180deg) saturate(1.8);
     }
     .dark-tooltip {
       background: rgba(13,27,42,0.92);
