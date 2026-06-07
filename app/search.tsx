@@ -49,7 +49,7 @@ function getSearchMapHtml(lat: number, lng: number): string {
     .leaflet-control-attribution { display:none !important; }
     /* Navy blue tint filter on tiles */
     .leaflet-tile-pane {
-      filter: brightness(0.78) contrast(1.15) sepia(0.3) hue-rotate(180deg) saturate(1.8);
+      filter: brightness(1.1) contrast(1.05) sepia(0.2) hue-rotate(190deg) saturate(1.5);
     }
   </style>
 </head>
