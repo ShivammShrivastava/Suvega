@@ -35,19 +35,23 @@ function getMapHtml(
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    html, body, #map { width:100%; height:100%; background:#1A1A1A; }
+    html, body, #map { width:100%; height:100%; background:#0d1b2a; }
+    /* Navy blue tint filter on tiles */
+    .leaflet-tile-pane {
+      filter: brightness(0.55) contrast(1.3) sepia(0.35) hue-rotate(180deg) saturate(2.2);
+    }
     .dark-tooltip {
-      background: rgba(26,26,26,0.92);
+      background: rgba(13,27,42,0.92);
       color: #FFFFFF;
-      border: 1px solid #444;
+      border: 1px solid rgba(66,133,244,0.3);
       border-radius: 6px;
       font-size: 11px;
       padding: 4px 8px;
       font-family: -apple-system, sans-serif;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     }
     .dark-tooltip::before {
-      border-top-color: rgba(26,26,26,0.92) !important;
+      border-top-color: rgba(13,27,42,0.92) !important;
     }
     .leaflet-control-attribution { display:none !important; }
   </style>
@@ -397,16 +401,16 @@ const styles = StyleSheet.create({
   // Section 2
   section2: {
     flex: 1,
-    backgroundColor: C.bgCard,
+    backgroundColor: '#0d1b2a',
     overflow: 'hidden',
   },
   webView: {
     flex: 1,
-    backgroundColor: C.bgCard,
+    backgroundColor: '#0d1b2a',
   },
   mapLoading: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: C.bgCard,
+    backgroundColor: '#0d1b2a',
     justifyContent: 'center',
     alignItems: 'center',
   },

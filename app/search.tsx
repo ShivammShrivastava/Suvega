@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { WebView } from 'react-native-webview';
+import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Colour palette ──────────────────────────────────────────
@@ -31,6 +33,60 @@ interface Place {
   lon: string;
 }
 
+// ─── Background map HTML (user location only) ────────────────
+function getSearchMapHtml(lat: number, lng: number): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body, #map { width:100%; height:100%; background:#0d1b2a; }
+    .leaflet-control-attribution { display:none !important; }
+    /* Navy blue tint filter on tiles */
+    .leaflet-tile-pane {
+      filter: brightness(0.55) contrast(1.3) sepia(0.35) hue-rotate(180deg) saturate(2.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    }).setView([${lat}, ${lng}], 14);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19, subdomains: 'abcd'
+    }).addTo(map);
+
+    // Pulse ring
+    L.circleMarker([${lat}, ${lng}], {
+      radius: 20, color: '#4285F4', fillColor: '#4285F4',
+      fillOpacity: 0.12, weight: 1.5
+    }).addTo(map);
+
+    // User dot
+    var userDot = L.circleMarker([${lat}, ${lng}], {
+      radius: 8, color: '#FFFFFF', fillColor: '#4285F4',
+      fillOpacity: 1, weight: 2.5
+    }).addTo(map);
+
+    window.updateUserLocation = function(lat, lng) {
+      userDot.setLatLng([lat, lng]);
+      map.setView([lat, lng], 14, { animate: true });
+    };
+  </script>
+</body>
+</html>`;
+}
+
+// ─── Search Screen ───────────────────────────────────────────
 export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -38,6 +94,32 @@ export default function SearchScreen() {
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState<Place[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [userLat, setUserLat] = useState(22.7196);  // Default: Indore
+  const [userLng, setUserLng] = useState(75.8577);
+  const [mapReady, setMapReady] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+
+  const webViewRef = useRef<WebView>(null);
+
+  // ── Get user location on mount ──
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setUserLat(loc.coords.latitude);
+      setUserLng(loc.coords.longitude);
+
+      if (mapReady && webViewRef.current) {
+        webViewRef.current.injectJavaScript(
+          `window.updateUserLocation(${loc.coords.latitude}, ${loc.coords.longitude}); true;`
+        );
+      }
+    })();
+  }, [mapReady]);
 
   // ── Debounced Nominatim search ──
   useEffect(() => {
@@ -64,9 +146,7 @@ export default function SearchScreen() {
       const response = await fetch(url, {
         headers: { 'User-Agent': 'SuvegaApp/1.0' },
       });
-
       if (!response.ok) throw new Error('Network error');
-
       const data: Place[] = await response.json();
       setResults(data);
     } catch {
@@ -76,7 +156,6 @@ export default function SearchScreen() {
     }
   }, []);
 
-  // ── When user taps a result ──
   const handleSelectPlace = useCallback(
     (item: Place) => {
       Keyboard.dismiss();
@@ -92,7 +171,6 @@ export default function SearchScreen() {
     [router]
   );
 
-  // ── Render a single result row ──
   const renderResultItem = useCallback(
     ({ item }: { item: Place }) => {
       const mainText = item.display_name.split(',')[0];
@@ -122,56 +200,82 @@ export default function SearchScreen() {
     [handleSelectPlace]
   );
 
-  return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* ── Title ── */}
-      <Text style={styles.title}>Where are you going?</Text>
+  const mapHtml = getSearchMapHtml(userLat, userLng);
+  const showResults = isSearchFocused && (results.length > 0 || (searchText.length >= 3 && !isLoading));
 
-      {/* ── Search Input ── */}
-      <View style={styles.inputWrapper}>
-        <Text style={styles.searchIcon}>🔍</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Search destination..."
-          placeholderTextColor="#555555"
-          value={searchText}
-          onChangeText={setSearchText}
-          autoFocus
-          returnKeyType="search"
-          autoCorrect={false}
-        />
-        {isLoading && (
-          <ActivityIndicator
-            size="small"
-            color={C.green}
-            style={styles.spinner}
+  return (
+    <View style={styles.container}>
+      {/* ── Full-screen map background ── */}
+      <WebView
+        ref={webViewRef}
+        source={{ html: mapHtml }}
+        style={StyleSheet.absoluteFillObject}
+        onLoad={() => setMapReady(true)}
+        javaScriptEnabled
+        domStorageEnabled
+        scrollEnabled={false}
+        bounces={false}
+        overScrollMode="never"
+        originWhitelist={['*']}
+        mixedContentMode="always"
+      />
+
+      {/* ── Floating search bar ── */}
+      <View style={[styles.searchOverlay, { paddingTop: insets.top + 12 }]}>
+        <View style={styles.searchBar}>
+          {/* Suvega mini icon */}
+          <View style={styles.miniIcon}>
+            <View style={styles.miniNeedle} />
+            <View style={styles.miniArc} />
+          </View>
+
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search here"
+            placeholderTextColor="#888888"
+            value={searchText}
+            onChangeText={setSearchText}
+            onFocus={() => setIsSearchFocused(true)}
+            returnKeyType="search"
+            autoCorrect={false}
           />
+
+          {isLoading ? (
+            <ActivityIndicator size="small" color={C.green} />
+          ) : (
+            <Text style={styles.searchTrailingIcon}>🔍</Text>
+          )}
+        </View>
+
+        {/* ── Results overlay ── */}
+        {showResults && (
+          <View style={styles.resultsOverlay}>
+            <FlatList
+              data={results}
+              keyExtractor={(item) => String(item.place_id)}
+              renderItem={renderResultItem}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                searchText.length >= 3 && !isLoading ? (
+                  <Text style={styles.emptyText}>No results found</Text>
+                ) : null
+              }
+            />
+          </View>
         )}
       </View>
 
-      {/* ── Results List ── */}
-      <FlatList
-        data={results}
-        keyExtractor={(item) => String(item.place_id)}
-        renderItem={renderResultItem}
-        keyboardShouldPersistTaps="handled"
-        style={styles.resultsList}
-        ListEmptyComponent={
-          searchText.length >= 3 && !isLoading ? (
-            <Text style={styles.emptyText}>No results found</Text>
-          ) : searchText.length === 0 ? (
-            <View style={styles.hintContainer}>
-              <Text style={styles.hintEmoji}>📍</Text>
-              <Text style={styles.hintText}>
-                Search for any location in India
-              </Text>
-              <Text style={styles.hintSubText}>
-                Type at least 3 characters to search
-              </Text>
-            </View>
-          ) : null
-        }
-      />
+      {/* ── Tap to dismiss results ── */}
+      {showResults && (
+        <TouchableOpacity
+          style={styles.dismissOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            Keyboard.dismiss();
+            setIsSearchFocused(false);
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -180,56 +284,82 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: C.bg,
+    backgroundColor: '#0d1b2a',
   },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: C.textPrimary,
-    marginTop: 20,
-    marginBottom: 24,
-    paddingHorizontal: 20,
+  searchOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingHorizontal: 16,
   },
-  inputWrapper: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.bgCard,
+    backgroundColor: 'rgba(40, 40, 40, 0.92)',
+    borderRadius: 28,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderWidth: 0.5,
-    borderColor: C.border,
-    borderRadius: 12,
-    marginHorizontal: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    marginBottom: 8,
+    borderColor: 'rgba(100, 100, 100, 0.3)',
   },
-  searchIcon: {
-    fontSize: 16,
-    marginRight: 10,
+  miniIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1A1A1A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
   },
-  input: {
+  miniNeedle: {
+    position: 'absolute',
+    width: 12,
+    height: 1.5,
+    backgroundColor: '#FFFFFF',
+    transform: [{ rotate: '-45deg' }],
+    left: 4,
+    top: 15,
+  },
+  miniArc: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    borderTopColor: C.green,
+    top: 3,
+    transform: [{ rotate: '30deg' }],
+  },
+  searchInput: {
     flex: 1,
     fontSize: 16,
     color: C.textPrimary,
-    paddingVertical: 12,
+    paddingVertical: 4,
   },
-  spinner: {
+  searchTrailingIcon: {
+    fontSize: 16,
     marginLeft: 8,
   },
-  resultsList: {
-    flex: 1,
+  resultsOverlay: {
     marginTop: 8,
+    backgroundColor: 'rgba(20, 20, 20, 0.95)',
+    borderRadius: 16,
+    maxHeight: 320,
+    overflow: 'hidden',
+    borderWidth: 0.5,
+    borderColor: 'rgba(100, 100, 100, 0.2)',
   },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: C.bgCard,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginBottom: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 0.5,
     borderBottomColor: C.divider,
-    borderRadius: 8,
   },
   pinIcon: {
     fontSize: 18,
@@ -252,26 +382,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#555555',
     fontSize: 14,
-    marginTop: 40,
+    paddingVertical: 24,
   },
-  hintContainer: {
-    alignItems: 'center',
-    marginTop: 80,
-    paddingHorizontal: 40,
-  },
-  hintEmoji: {
-    fontSize: 40,
-    marginBottom: 16,
-  },
-  hintText: {
-    fontSize: 16,
-    color: C.textHint,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  hintSubText: {
-    fontSize: 13,
-    color: '#555555',
-    textAlign: 'center',
+  dismissOverlay: {
+    position: 'absolute',
+    top: 200,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
   },
 });
